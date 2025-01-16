@@ -141,6 +141,8 @@
     <None Include="Shaders\shader.vs" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\..\..\..\OpenGl\include\Camera.h" />
+    <ClInclude Include="..\..\..\..\OpenGl\include\Particle.h" />
     <ClInclude Include="..\..\..\..\OpenGl\include\shader_s.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

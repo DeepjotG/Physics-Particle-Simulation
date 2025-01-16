@@ -1,21 +1,41 @@
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <shader_s.h>
+#include <Camera.h>
+#include <Particle.h>
+
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
 
 #include <vector>
 #include <iostream>
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
+void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 void processInput(GLFWwindow* window);
 
 void APIENTRY glDebugOutput(GLenum source, GLenum type, unsigned int id, GLenum severity,
     GLsizei length, const char* message, const void* userParam);
+
 
 // settings
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
 
+Camera camera;
+bool firstMouse = true;
+float lastX = 400.0f;  // Initialize with some default value (center of the window)
+float lastY = 300.0f;  // Initialize with some default value (center of the window)
+
+float deltaTime = 0.0f;	// time between current frame and last frame
+float lastFrame = 0.0f;
+
+
+/*
 vector<float> createTriangleVertices(float radius) {
     const float PI = 3.1415926f;
     const float H_ANGLE = PI / 180 * 72;    // 72 degree = 360 / 5
@@ -181,6 +201,7 @@ void subdivisionIscosphere(float subdivision, vector<float>& vertices, vector<un
     }
 }
 
+*/
 
 int main()
 {
@@ -204,6 +225,10 @@ int main()
     }
     glfwMakeContextCurrent(window);
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetScrollCallback(window, scroll_callback);
+
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
     // glad: load all OpenGL function pointers
     // ---------------------------------------
@@ -220,6 +245,8 @@ int main()
 
 
 
+    glEnable(GL_DEPTH_TEST);
+
     // build and compile our shader program
     // ------------------------------------
     Shader ourShader("Shaders/shader.vs", "Shaders/shader.fs"); // you can name your shader files however you like
@@ -234,7 +261,7 @@ int main()
     };
     */
 
-    vector<float> vertices = createTriangleVertices(1.0f);
+    vector<float> vertices;
 
     vector<unsigned int> Indices = {
         0,1,2,
@@ -260,7 +287,9 @@ int main()
         9, 11, 10, 
         10, 11, 6 };
 
-    subdivisionIscosphere(4, vertices, Indices, 1.0f);
+    Particle Iscosphere(1.0f, 6.0f, vertices, Indices);
+    Iscosphere.vertices = Iscosphere.createTriangleVertices();
+    Iscosphere.subdivisionIscosphere();
 
 
     unsigned int VBO, VAO, EBO;
@@ -271,10 +300,10 @@ int main()
     glBindVertexArray(VAO);
 
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), Iscosphere.vertices.data(), GL_STATIC_DRAW);
 
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, Indices.size() *sizeof(unsigned int), Indices.data(), GL_STATIC_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, Indices.size() *sizeof(unsigned int), Iscosphere.indices.data(), GL_STATIC_DRAW);
 
     // position attribute
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
@@ -287,11 +316,15 @@ int main()
     // VAOs requires a call to glBindVertexArray anyways so we generally don't unbind VAOs (nor VBOs) when it's not directly necessary.
     // glBindVertexArray(0);
 
-    glPointSize(10);
+    glPointSize(2);
     // render loop
     // -----------
     while (!glfwWindowShouldClose(window))
-    {
+    {   
+
+        float currentFrame = static_cast<float>(glfwGetTime());
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
         // input
         // -----
         processInput(window);
@@ -299,13 +332,23 @@ int main()
         // render
         // ------
         glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // render the triangle
         ourShader.use();
+
+        // pass projection matrix to shader (note that in this case it could change every frame)
+        glm::mat4 projection = glm::perspective(glm::radians(camera.Zoom), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+        ourShader.setMat4("projection", projection);
+
+        // camera/view transformation
+        glm::mat4 view = camera.GetViewMatrix();
+        ourShader.setMat4("view", view);
+
+
         glBindVertexArray(VAO);
         //glDrawElements(GL_TRIANGLES, Indices.size(), GL_UNSIGNED_INT, 0);
-        glDrawArrays(GL_POINTS, 0, 960);
+        glDrawArrays(GL_POINTS, 0, Iscosphere.vertices.size() / 3);
         // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
         // -------------------------------------------------------------------------------
         glfwSwapBuffers(window);
@@ -333,6 +376,20 @@ void processInput(GLFWwindow* window)
 {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
+
+    float cameraSpeed = camera.MovementSpeed * deltaTime;
+
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        camera.ProcessKeyboard(FORWARD, deltaTime);  // Move forward
+
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        camera.ProcessKeyboard(BACKWARD, deltaTime); // Move backward
+
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        camera.ProcessKeyboard(LEFT, deltaTime);    // Move left
+
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        camera.ProcessKeyboard(RIGHT, deltaTime);   // Move right
 }
 
 // glfw: whenever the window size changed (by OS or user resize) this callback function executes
@@ -342,6 +399,36 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     // make sure the viewport matches the new window dimensions; note that width and 
     // height will be significantly larger than specified on retina displays.
     glViewport(0, 0, width, height);
+}
+
+
+// glfw: whenever the mouse moves, this callback is called
+// -------------------------------------------------------
+void mouse_callback(GLFWwindow* window, double xposIn, double yposIn)
+{
+    float xpos = static_cast<float>(xposIn);
+    float ypos = static_cast<float>(yposIn);
+
+    if (firstMouse)
+    {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
+
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos; // reversed since y-coordinates go from bottom to top
+    lastX = xpos;
+    lastY = ypos;
+
+    camera.ProcessMouseMovement(xoffset, yoffset);
+}
+
+// glfw: whenever the mouse scroll wheel scrolls, this callback is called
+// ----------------------------------------------------------------------
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    camera.ProcessMouseScroll(static_cast<float>(yoffset));
 }
 
 
@@ -391,4 +478,5 @@ void APIENTRY glDebugOutput(GLenum source,
     } std::cout << std::endl;
     std::cout << std::endl;
 }
+
 
